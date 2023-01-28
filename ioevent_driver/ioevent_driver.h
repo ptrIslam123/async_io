@@ -1,6 +1,6 @@
 #pragma once
 
-#include <function>
+#include <functional>
 
 namespace ioevent {
 
@@ -12,10 +12,10 @@ enum class IOEventDriverType {
 struct IOEventDriver {
     using IOEventHandler = std::function<void(int fd)>;
 
-    virtual bool sibscribeToEvent(int fd, IOEventDriverType evenType, IOEventHandler eventHandler) override;
-    virtual bool unsibscribeFromEvent(int fd) override;
-    virtual void runEventLoop() override;
-    virtual void stopEventLoop() override;
+    virtual bool subscribeToEvent(int fd, IOEventDriverType evenType, IOEventHandler eventHandler) = 0;
+    virtual bool unsubscribeFromEvent(int fd) = 0;
+    virtual void runEventLoop() = 0;
+    virtual void stopEventLoop() = 0;
     virtual ~IOEventDriver() = default;
 };
 
