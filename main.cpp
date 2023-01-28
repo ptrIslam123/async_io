@@ -25,7 +25,7 @@ int main(int argc, char** argv) {
     }
 
     auto ioEventDriver = std::unique_ptr<ioevent::IOEventDriver>(
-        new ioevent::IOEventPool<ioevent::LockFreeMute>());
+        new ioevent::SingleThreadIOEventDriver<ioevent::LockFreeMute>());
 
     const auto fileName(argv[1]);
     const auto fdOnWrite = OpenFile(fileName, O_WRONLY);

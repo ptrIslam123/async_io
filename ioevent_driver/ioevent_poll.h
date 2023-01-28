@@ -6,14 +6,25 @@
 #include <algorithm>
 #include <stdexcept>
 #include <sstream>
+#include <mutex>
+
 #include <poll.h>
 
 namespace ioevent {
 
 struct LockFreeMute {
-    void lock() {}
-    void unlock() {}
+    inline void lock() {}
+    inline void unlock() {}
 };
+
+template<typename Mutex>
+class IOEventPool;
+
+template<typename Mutex = LockFreeMute>
+using SingleThreadIOEventDriver = IOEventPool<Mutex>;
+
+template<typename Mutex = std::mutex>
+using MultiThreadIOEventDriver = IOEventPool<Mutex>; 
 
 template<typename Mutex>
 class IOEventPool : public IOEventDriver {
