@@ -20,7 +20,8 @@ public:
     StaticThreadPool &operator=(StaticThreadPool &&other) = default;
     StaticThreadPool(const StaticThreadPool &other) = delete;
     StaticThreadPool &operator=(const StaticThreadPool &other) = delete;
-    void submitTask(const Task &task);
+    void run();
+    void spawnTask(const Task &task);
     void join();
 
 private:
@@ -30,6 +31,7 @@ private:
     TaskQueue queue_;
     std::condition_variable queueEventDriver_;
     std::mutex queueLock_;
+    unsigned int threadCount_;
 };
 
 } // namespace thread
