@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #include "ioevent_driver/ioevent_driver.h"
-#include "ioevent_driver/ioevent_pool.h"
+#include "ioevent_driver/ioevent_poll.h"
 
 int OpenFile(const std::string& fileName, const int mode) {
     const auto res = open(fileName.c_str(), mode);
