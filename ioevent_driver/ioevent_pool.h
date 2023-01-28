@@ -47,29 +47,45 @@ private:
 
     std::queue<CacheStruct> cacheForAppend_;
     std::queue<int> cacheForDelete_;
+
     std::vector<PollFdStruct> fdSet_;
     std::vector<UserEventHandlerStruct> userEventHandlers_;
-    Mutex mutex_;
+
+    Mutex mutexForEventHandlers_;
+    Mutex mutexCachForAppend_;
+    Mutex mutexCachForDeleter_;
+    
     bool isStoped_;
 };
 
 template<typename Mutex>
 IOEventPool::IOEventPool():
-
+cacheForAppend_(),
+cacheForDelete_(),
+fdSet_(),
+userEventHandlers_(),
+mutexForEventHandlers_(),
+mutexCachForAppend_(),
+mutexCachForDeleter_(),
+isStoped_(true) 
+{}
 
 template<typename Mutex>
 void IOEventPool::runEventLoop() {
-    mutex_.lock();
+    mutexForEventHandlers_.lock();
     isStoped_ = false;
-    mutex_.unlock();
+    mutexForEventHandlers_.unlock();
 
     while (!isStoped_) {
+        mutexForEventHandlers_.lock();
         const auto res = pool(fdSet_.data(), fdSet_.size(), NULL, -1);
         if (res < 0) {
             throw std::runtime_exception("IOEventPool::runEventLoop: sys call pool was failed");
         }
 
         handleNewEvents(res);
+        mutexForEventHandlers_.unlock();
+
         updateEventListeners();
     }
 }
@@ -87,24 +103,31 @@ void IOEventPool::handleNewEvents(int eventCount) {
 
 template<typename Mutex>
 void IOEventPool::updateCaches() {
-    mutex_.lock();
     updateCachesForAppend();
     updateCachesForDelete();
-    mutex_.unlock();
 }
 
 template<typename Mutex>
 void IOEventPool::updateCachesForAppend() {
+    mutexCachForAppend_.lock();
+    mutexForEventHandlers_.lock();
+
     while (!cacheForAppend_.empty()) {
         const auto [userEventHandler, pollFd] = cacheForAppend_.top();
         cacheForAppend_.pop();
         fdSet_.push_back(pollFd);
         userEventHandlers_.push_back(userEventHandler);
     }
+
+    mutexForEventHandlers_.unlock();
+    mutexCachForAppend_.unlock();
 }
 
 template<typename Mutex>
 void IOEventPool::updateCachesForDelete() {
+    mutexCachForDeleter_.lock();
+    mutexForEventHandlers_.lock();
+
     while (!cacheForDelete_.empty()) {
         const auto fd = cacheForDelete_.top();
         cacheForDelete_.pop();
@@ -133,13 +156,16 @@ void IOEventPool::updateCachesForDelete() {
             throw std::runtime_exception(ss.str());
         }
     }
+
+    mutexForEventHandlers_.unlock();
+    mutexCachForDeleter_.unlock();
 }
 
 template<typename Mutex>
 void IOEventPool::stopEventLoop() {
-    mutex_.lock();
+    mutexForEventHandlers_.lock();
     isStoped_ = true;
-    mutex_.unlock();
+    mutexForEventHandlers_.unlock();
 }
 
 template<typename Mutex>
@@ -164,17 +190,17 @@ bool IOEventPool::sibscribeToEvent(const int fd, const IOEventDriverType evenTyp
         cachRecord.pollFd = pollFd;
     }
     
-    mutex_.lock();
+    mutexCachForAppend_.lock();
     cacheForAppend_.push(cachRecord)
-    mutex_.unlock();
+    mutexCachForAppend_.unlock();
     return true;
 }
 
 template<typename Mutex>
 bool IOEventPool::unsibscribeFromEvent(const int fd) {
-    mutex_.lock();
+    mutexCachForDeleter_.lock();
     cacheForDelete_.push(fd);
-    mutex_.unlock();
+    mutexCachForDeleter_.unlock();
 }
 
 } // namespace ioevent
