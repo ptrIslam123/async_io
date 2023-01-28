@@ -10,15 +10,18 @@ StaticThreadPool::StaticThreadPool(const unsigned short threadsCount):
 workers_(threadsCount),
 queue_(),
 queueEventDriver_(),
-queueLock_() {
-    std::generate_n(workers_.begin(), threadsCount, [this]() {
+queueLock_() 
+{}
+
+void StaticThreadPool::run() {
+    std::generate_n(workers_.begin(), workers_.size(), [this]() {
         return std::thread([this]() {
             work();
         });
     });
 }
 
-void StaticThreadPool::submitTask(const StaticThreadPool::Task &task) {
+void StaticThreadPool::spawnTask(const StaticThreadPool::Task &task) {
     std::lock_guard<std::mutex> lock(queueLock_);
     try {
         queue_.push(task);
@@ -31,7 +34,7 @@ void StaticThreadPool::submitTask(const StaticThreadPool::Task &task) {
 
 void StaticThreadPool::join() {
     for (auto i = 0; i < workers_.size(); ++i) {
-        submitTask({});
+        spawnTask({});
     }
 
     for(auto& worker : workers_) {
