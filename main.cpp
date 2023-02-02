@@ -9,6 +9,7 @@
 
 #include "ioevent_driver/ioevent_driver.h"
 #include "ioevent_driver/ioevent_poll.h"
+#include "asyncio_driver/asyncio_driver.h"
 
 int OpenFile(const std::string& fileName, const int mode) {
     const auto res = open(fileName.c_str(), mode);
@@ -26,6 +27,8 @@ int main(int argc, char** argv) {
 
     auto ioEventDriver = std::unique_ptr<ioevent::IOEventDriver>(
         new ioevent::SingleThreadIOEventDriver<ioevent::LockFreeMute>());
+    
+    auto threadPool = std::make_unique<thread::StaticThreadPool>(4); 
 
     const auto fileName(argv[1]);
     const auto fdOnWrite = OpenFile(fileName, O_WRONLY);
