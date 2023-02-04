@@ -1,7 +1,6 @@
 #include "static_thread_pool.h"
 
 #include <algorithm>
-#include <mutex>
 #include <stdexcept>
 
 namespace thread {
@@ -10,7 +9,8 @@ StaticThreadPool::StaticThreadPool(const unsigned short threadsCount):
 workers_(threadsCount),
 queue_(),
 queueEventDriver_(),
-queueLock_() 
+queueLock_(),
+workerCount_(0)
 {}
 
 void StaticThreadPool::run() {
@@ -19,12 +19,13 @@ void StaticThreadPool::run() {
             work();
         });
     });
+    workerCount_.store(static_cast<int>(workers_.size()));
 }
 
-void StaticThreadPool::spawnTask(const StaticThreadPool::Task &task) {
+void StaticThreadPool::spawnTask(const StaticThreadPool::Task&& task) {
     std::lock_guard<std::mutex> lock(queueLock_);
     try {
-        queue_.push(task);
+        queue_.push(std::move(task));
     } catch (const std::bad_alloc &e) {
         throw std::runtime_error("Can`t submit a new task to static thread pool. "
                                  "Resource limit exceeded");
@@ -56,6 +57,8 @@ void StaticThreadPool::work() {
         lock.unlock();
 
         if (!task) {
+            auto curCount = workerCount_.load();
+            while (workerCount_.compare_exchange_weak(curCount, curCount - 1)) {}
             break;
         } else {
             task();

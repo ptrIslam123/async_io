@@ -10,6 +10,8 @@
 
 #include <poll.h>
 
+#include <iostream>
+
 namespace ioevent {
 
 struct LockFreeMute {
@@ -32,7 +34,7 @@ public:
     IOEventPool();
 
 protected:
-    bool subscribeToEvent(int fd, IOEventDriverType evenType, IOEventHandler eventHandler) override;
+    bool subscribeToEvent(int fd, IOEventDriverType evenType, IOEventHandler&& eventHandler) override;
     bool unsubscribeFromEvent(int fd) override;
     void runEventLoop() override;
     void stopEventLoop() override;
@@ -42,6 +44,7 @@ private:
     void updateCachesForAppend();
     void updateCachesForDelete();
     void updateCaches();
+    bool removeUserDescriptorHandlerByIndex(int index);
 
     using PollFdStruct = struct pollfd;
 
@@ -90,11 +93,13 @@ void IOEventPool<Mutex>::runEventLoop() {
 
     while (!isStoped_) {
         mutexForEventHandlers_.lock();
-        const auto res = poll(fdSet_.data(), fdSet_.size(), -1);
+        const auto timeout = 100;
+        const auto res = poll(fdSet_.data(), fdSet_.size(), timeout);
         if (res < 0) {
             throw std::runtime_error("IOEventPool::runEventLoop: sys call pool was failed");
         }
 
+        std::cout << "go out from poll call with resul=" << res << " and fdset size=" << fdSet_.size() << std::endl;
         handleNewEvents(res);
         mutexForEventHandlers_.unlock();
 
@@ -105,10 +110,21 @@ void IOEventPool<Mutex>::runEventLoop() {
 template<typename Mutex>
 void IOEventPool<Mutex>::handleNewEvents(int eventCount) {
     for (auto i = 0; i < fdSet_.size() && eventCount > 0; ++i) {
-        const auto curFd = fdSet_[i];
-        const auto eventHandler = userEventHandlers_[i].eventHandler;
-        if (curFd.revents == curFd.events) {
-            eventHandler(curFd.fd);
+        auto& curFd = fdSet_[i];
+        auto& curEventHandler = userEventHandlers_[i];
+        std::cout << "Cur iter index=" << i << " and fd=" << curFd.fd << " and handler addr=" << &curEventHandler.eventHandler << std::endl;
+        if (curFd.revents == curFd.events && curFd.fd >= 0 && curEventHandler.eventHandler) {
+            /*
+             * We need check descriptor state because sys call 'poll' can be to one thread and call method 'unsubscribeFromEvent(int fd)' to other thread.
+             * Then user want unsubscribe him descriptor from notifications he can use 'unsubscribeFromEvent'. But this call put code (for erase this descriptor
+             * from traced) to cache for deleting events and this cache can be don`t update long time and async io dirver will think that this descriptor need notify
+             * about next events.
+             */
+            if (curEventHandler.eventHandler(curFd.fd) == ioevent::DescriptorState::Closed) {
+                std::cout << "clear fd=" << curFd.fd << std::endl;
+                curEventHandler.eventHandler = {};
+                curFd.fd = -1;
+            }
             --eventCount;
         }
     }
@@ -137,6 +153,33 @@ void IOEventPool<Mutex>::updateCachesForAppend() {
 }
 
 template<typename Mutex>
+bool IOEventPool<Mutex>::removeUserDescriptorHandlerByIndex(const int index) {
+    {
+        auto it = userEventHandlers_.begin();
+        std::advance(it, index);
+
+        if (it != userEventHandlers_.end()) {
+            userEventHandlers_.erase(it);
+        } else {
+            return false;
+        }
+    }
+
+    {
+        auto it = fdSet_.begin();
+        std::advance(it, index);
+
+        if (it != fdSet_.end()) {
+            fdSet_.erase(it);
+        } else {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+template<typename Mutex>
 void IOEventPool<Mutex>::updateCachesForDelete() {
     mutexCachForDeleter_.lock();
     mutexForEventHandlers_.lock();
@@ -144,27 +187,20 @@ void IOEventPool<Mutex>::updateCachesForDelete() {
     while (!cacheForDelete_.empty()) {
         auto fd = cacheForDelete_.front();
         cacheForDelete_.pop();
-        
+
         std::stringstream ss;
-        ss << "IOEventPool::unsubscribeFromEvent: Can`t erase fd: " << fd << "becasu it doesn` exist";
+        ss << "IOEventPool::unsubscribeFromEvent: Can`t remove fd: " << fd << "becaus it doesn`t exist";
 
-        const auto fdSetIt = std::find_if(fdSet_.cbegin(), fdSet_.cend(), [fd](const auto& pollFd) {
-            return pollFd.fd == fd;
-        });
-
-        if (fdSetIt != fdSet_.cend()) {
-            fdSet_.erase(fdSetIt);
-        } else {
-            throw std::runtime_error(ss.str());
+        auto index = -1;
+        for (auto i = 0; i < userEventHandlers_.size(); ++i) {
+            if (userEventHandlers_[i].fd == fd) {
+                index = i;
+                break;
+            }
         }
 
-
-        const auto userEventHandlerIt = std::find_if(userEventHandlers_.cbegin(), userEventHandlers_.cend(), [fd](const auto& userEventHarder) {
-            return userEventHarder.fd == fd;
-        });
-
-        if (userEventHandlerIt != userEventHandlers_.cend()) {
-            userEventHandlers_.erase(userEventHandlerIt);
+        if ((index >= 0) && removeUserDescriptorHandlerByIndex(index)) {
+            // do nothing
         } else {
             throw std::runtime_error(ss.str());
         }
@@ -179,10 +215,11 @@ void IOEventPool<Mutex>::stopEventLoop() {
     mutexForEventHandlers_.lock();
     isStoped_ = true;
     mutexForEventHandlers_.unlock();
+    updateCaches();
 }
 
 template<typename Mutex>
-bool IOEventPool<Mutex>::subscribeToEvent(const int fd, const IOEventDriverType eventType, const IOEventHandler eventHandler) {
+bool IOEventPool<Mutex>::subscribeToEvent(const int fd, const IOEventDriverType eventType, IOEventHandler&& eventHandler) {
     CacheStruct cachRecord;
     {
         PollFdStruct pollFd = {.fd = fd};
@@ -199,7 +236,7 @@ bool IOEventPool<Mutex>::subscribeToEvent(const int fd, const IOEventDriverType 
         }
         const UserEventHandlerStruct userEventHandler = {.fd = fd, .eventType = eventType, .eventHandler = eventHandler};
         
-        cachRecord.userEventHandler = userEventHandler;
+        cachRecord.userEventHandler = std::move(userEventHandler);
         cachRecord.pollFd = pollFd;
     }
     
@@ -214,6 +251,7 @@ bool IOEventPool<Mutex>::unsubscribeFromEvent(const int fd) {
     mutexCachForDeleter_.lock();
     cacheForDelete_.push(fd);
     mutexCachForDeleter_.unlock();
+
     return true;
 }
 

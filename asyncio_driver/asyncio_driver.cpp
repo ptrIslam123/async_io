@@ -1,4 +1,5 @@
 #include "asyncio_driver.h"
+#include <iostream>
 
 namespace asyncio {
 
@@ -8,12 +9,16 @@ threadPool_(std::move(threadPool))
 {}
 
 void AsyncIODriver::run() {
+    threadPool_->run();
     threadPool_->spawnTask([ioEventDriver = iOEventDriver_.get()]() {
         ioEventDriver->runEventLoop();
     });
 }
 
 void AsyncIODriver::stop() {
+    std::cout << "Stop io event driver" << std::endl;
+    iOEventDriver_->stopEventLoop();
+    std::cout << "Stop thread pool" << std::endl;
     threadPool_->join();
 }
 

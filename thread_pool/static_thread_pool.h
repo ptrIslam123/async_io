@@ -4,6 +4,7 @@
 #include <queue>
 #include <condition_variable>
 #include <thread>
+#include <atomic>
 #include <mutex>
 #include <functional>
 
@@ -21,7 +22,7 @@ public:
     StaticThreadPool(const StaticThreadPool &other) = delete;
     StaticThreadPool &operator=(const StaticThreadPool &other) = delete;
     void run();
-    void spawnTask(const Task &task);
+    void spawnTask(const Task&& task);
     void join();
 
 private:
@@ -31,7 +32,7 @@ private:
     TaskQueue queue_;
     std::condition_variable queueEventDriver_;
     std::mutex queueLock_;
-    unsigned int threadCount_;
+    std::atomic<int> workerCount_;
 };
 
 } // namespace thread
